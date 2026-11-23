@@ -7,10 +7,15 @@ class RollScreen extends StatefulWidget {
   final List<String> movies;
   final bool isSeries;
 
+  /// Se llama con el título original (el de tu lista) al marcar algo como visto,
+  /// para que la pantalla anterior lo elimine y guarde.
+  final void Function(String title)? onMarkWatched;
+
   const RollScreen({
     super.key,
     required this.movies,
     this.isSeries = false,
+    this.onMarkWatched,
   });
 
   @override
@@ -19,6 +24,7 @@ class RollScreen extends StatefulWidget {
 
 class MediaDetails {
   final String title;
+  final String originalTitle; // tal y como está en tu lista
   final String posterPath;
   final double rating;
   final String overview;
@@ -26,6 +32,7 @@ class MediaDetails {
 
   MediaDetails({
     required this.title,
+    required this.originalTitle,
     required this.posterPath,
     required this.rating,
     required this.overview,
@@ -34,98 +41,108 @@ class MediaDetails {
 }
 
 class _RollScreenState extends State<RollScreen> {
-  bool _isLoading = true;
+  bool _isLoading = false;
   List<MediaDetails> _rankedMedia = [];
+  late final List<String> _pool;
 
   final String _tmdbToken = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxOTcwNzI4OTE2OTA2NWIxY2U5MTYyNGYwNWUzOTAzZSIsIm5iZiI6MTc4NjM1OTQzNi44MTEsInN1YiI6IjZhNzlhZThjODM0N2E5MTUwMzZjYzU4YyIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.uz-BuRbvT5bh0M-Jod0UGcVYJSK_tAz3IhzH-uprWto';
 
   @override
   void initState() {
     super.initState();
-    _fetchAndRankMedia();
+    _pool = List<String>.from(widget.movies);
+    if (_pool.isNotEmpty) {
+      _isLoading = true;
+      _fetchAndRankMedia();
+    }
+  }
+
+  Future<MediaDetails> _fetchOne(String title) async {
+    final endpoint = widget.isSeries ? 'tv' : 'movie';
+
+    MediaDetails fallback(String message) => MediaDetails(
+          title: title,
+          originalTitle: title,
+          posterPath: '',
+          rating: 0.0,
+          overview: message,
+          releaseDate: 'N/A',
+        );
+
+    try {
+      final url = Uri.parse(
+        'https://api.themoviedb.org/3/search/$endpoint?query=${Uri.encodeComponent(title)}&language=es-ES',
+      );
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer $_tmdbToken',
+          'accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode != 200) {
+        return fallback('No se pudo consultar la base de datos (código ${response.statusCode}).');
+      }
+
+      final data = json.decode(utf8.decode(response.bodyBytes));
+      final results = (data is Map ? data['results'] : null) as List? ?? const [];
+      if (results.isEmpty) {
+        return fallback('No se encontró información en la base de datos.');
+      }
+
+      final item = results.first as Map;
+      final poster = item['poster_path'];
+      final overview = item['overview'];
+      final fullDate = item[widget.isSeries ? 'first_air_date' : 'release_date'];
+      final realTitle = item[widget.isSeries ? 'name' : 'title'];
+
+      return MediaDetails(
+        title: realTitle is String && realTitle.isNotEmpty ? realTitle : title,
+        originalTitle: title,
+        posterPath: poster is String && poster.isNotEmpty
+            ? 'https://image.tmdb.org/t/p/w500$poster'
+            : '',
+        rating: (item['vote_average'] as num?)?.toDouble() ?? 0.0,
+        overview: overview is String && overview.trim().isNotEmpty
+            ? overview
+            : 'Sin sinopsis disponible.',
+        releaseDate: fullDate is String && fullDate.length >= 4 ? fullDate.substring(0, 4) : 'N/A',
+      );
+    } catch (e) {
+      return fallback('Error de conexión.');
+    }
   }
 
   Future<void> _fetchAndRankMedia() async {
-    if (widget.movies.isEmpty) {
-      setState(() => _isLoading = false);
-      return;
-    }
+    final selectedTitles = (List<String>.from(_pool)..shuffle(Random())).take(6).toList();
 
-    final random = Random();
-    final listCopy = List<String>.from(widget.movies);
-    listCopy.shuffle(random);
-    
-    final selectedTitles = listCopy.take(6).toList();
-    List<MediaDetails> fetchedList = [];
-    final endpoint = widget.isSeries ? 'tv' : 'movie';
+    // Las 6 consultas a la vez (antes eran una detrás de otra)
+    final fetched = await Future.wait(selectedTitles.map(_fetchOne));
+    if (!mounted) return;
 
-    for (var title in selectedTitles) {
-      try {
-        final url = Uri.parse(
-          'https://api.themoviedb.org/3/search/$endpoint?query=${Uri.encodeComponent(title)}&language=es-ES',
-        );
-        
-        final response = await http.get(
-          url,
-          headers: {
-            'Authorization': 'Bearer $_tmdbToken',
-            'accept': 'application/json',
-          },
-        );
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final results = data['results'] as List;
-
-          if (results.isNotEmpty) {
-            final itemData = results[0];
-            final posterPath = itemData['poster_path'] != null
-                ? 'https://image.tmdb.org/t/p/w500${itemData['poster_path']}'
-                : '';
-            final rating = (itemData['vote_average'] as num?)?.toDouble() ?? 0.0;
-            final overview = itemData['overview'] ?? 'Sin sinopsis disponible.';
-            
-            final dateField = widget.isSeries ? 'first_air_date' : 'release_date';
-            final fullDate = itemData[dateField] ?? '';
-            final year = fullDate.isNotEmpty && fullDate.length >= 4 ? fullDate.substring(0, 4) : 'N/A';
-
-            final realTitle = widget.isSeries 
-                ? (itemData['name'] ?? title) 
-                : (itemData['title'] ?? title);
-
-            fetchedList.add(MediaDetails(
-              title: realTitle,
-              posterPath: posterPath,
-              rating: rating,
-              overview: overview,
-              releaseDate: year,
-            ));
-          } else {
-            fetchedList.add(MediaDetails(
-              title: title,
-              posterPath: '',
-              rating: 0.0,
-              overview: 'No se encontró información en la base de datos.',
-              releaseDate: 'N/A',
-            ));
-          }
-        }
-      } catch (e) {
-        fetchedList.add(MediaDetails(
-          title: title,
-          posterPath: '',
-          rating: 0.0,
-          overview: 'Error de conexión.',
-          releaseDate: 'N/A',
-        ));
-      }
-    }
-
-    fetchedList.sort((a, b) => b.rating.compareTo(a.rating));
+    final ranked = List<MediaDetails>.from(fetched)
+      ..sort((a, b) => b.rating.compareTo(a.rating));
 
     setState(() {
-      _rankedMedia = fetchedList;
+      _rankedMedia = ranked;
       _isLoading = false;
+    });
+  }
+
+  void _reroll() {
+    if (_pool.isEmpty) return;
+    setState(() => _isLoading = true);
+    _fetchAndRankMedia();
+  }
+
+  void _markWatched(MediaDetails media) {
+    widget.onMarkWatched?.call(media.originalTitle);
+    setState(() {
+      _rankedMedia.remove(media);
+      final i = _pool.indexOf(media.originalTitle);
+      if (i != -1) _pool.removeAt(i);
     });
   }
 
@@ -137,7 +154,7 @@ class _RollScreenState extends State<RollScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => DraggableScrollableSheet(
+      builder: (sheetContext) => DraggableScrollableSheet(
         initialChildSize: 0.75,
         minChildSize: 0.5,
         maxChildSize: 0.95,
@@ -160,6 +177,7 @@ class _RollScreenState extends State<RollScreen> {
                       image: media.posterPath.isNotEmpty
                           ? DecorationImage(
                               image: NetworkImage(media.posterPath),
+                              onError: (_, __) {},
                               fit: BoxFit.cover,
                             )
                           : null,
@@ -274,10 +292,12 @@ class _RollScreenState extends State<RollScreen> {
                     elevation: 0,
                   ),
                   onPressed: () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    final messenger = ScaffoldMessenger.of(this.context);
+                    Navigator.pop(sheetContext);
+                    _markWatched(media);
+                    messenger.showSnackBar(
                       SnackBar(
-                        content: Text('¡"${media.title}" marcada como vista!'),
+                        content: Text('¡"${media.title}" marcada como vista y quitada de la lista!'),
                         backgroundColor: Colors.green,
                         duration: const Duration(seconds: 2),
                       ),
@@ -309,7 +329,7 @@ class _RollScreenState extends State<RollScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.movies.isEmpty) {
+    if (_pool.isEmpty) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
         appBar: AppBar(
@@ -343,10 +363,7 @@ class _RollScreenState extends State<RollScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFFE0BE4A)),
-            onPressed: () {
-              setState(() => _isLoading = true);
-              _fetchAndRankMedia();
-            },
+            onPressed: _reroll,
             tooltip: 'Volver a tirar',
           ),
         ],
@@ -355,6 +372,27 @@ class _RollScreenState extends State<RollScreen> {
           ? const Center(
               child: CircularProgressIndicator(
                 color: Color(0xFFE0BE4A),
+              ),
+            )
+          : _rankedMedia.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '¡Has despachado todas las opciones!',
+                    style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 16),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _reroll,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFE0BE4A),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('🎲 Tirar otra vez'),
+                  ),
+                ],
               ),
             )
           : SingleChildScrollView(
@@ -402,6 +440,7 @@ class _RollScreenState extends State<RollScreen> {
                                 image: _rankedMedia[0].posterPath.isNotEmpty
                                     ? DecorationImage(
                                         image: NetworkImage(_rankedMedia[0].posterPath),
+                                        onError: (_, __) {},
                                         fit: BoxFit.cover,
                                       )
                                     : null,
@@ -503,6 +542,7 @@ class _RollScreenState extends State<RollScreen> {
                             image: item.posterPath.isNotEmpty
                                 ? DecorationImage(
                                     image: NetworkImage(item.posterPath),
+                                    onError: (_, __) {},
                                     fit: BoxFit.cover,
                                     opacity: 0.5,
                                   )

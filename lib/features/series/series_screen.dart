@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../roll/roll_screen.dart';
+import 'series_entry.dart';
+import 'series_manager_sheet.dart';
 
 class SeriesScreen extends StatefulWidget {
   const SeriesScreen({super.key});
@@ -10,8 +12,7 @@ class SeriesScreen extends StatefulWidget {
 }
 
 class _SeriesScreenState extends State<SeriesScreen> {
-  // Formato: "Título:::Temporada:::Capítulo"
-  List<String> _series = [];
+  List<SeriesEntry> _series = [];
   final TextEditingController _controller = TextEditingController();
 
   @override
@@ -22,259 +23,46 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   Future<void> _loadSeries() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
-      _series = prefs.getStringList('saved_series') ?? [];
+      _series = (prefs.getStringList('saved_series') ?? [])
+          .map(SeriesEntry.parse)
+          .toList();
     });
   }
 
   Future<void> _saveSeries() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('saved_series', _series);
+    await prefs.setStringList('saved_series', _series.map((s) => s.encode()).toList());
   }
 
   void _addSeries() {
     final text = _controller.text.trim();
     if (text.isNotEmpty) {
       setState(() {
-        _series.add('$text:::1:::1');
+        _series.add(SeriesEntry(text));
         _controller.clear();
       });
       _saveSeries();
     }
   }
 
-  String _getTitle(String item) {
-    final parts = item.split(':::');
-    return parts[0];
-  }
-
-  int _getSeason(String item) {
-    final parts = item.split(':::');
-    if (parts.length > 1) {
-      return int.tryParse(parts[1]) ?? 1;
-    }
-    return 1;
-  }
-
-  int _getEpisode(String item) {
-    final parts = item.split(':::');
-    if (parts.length > 2) {
-      return int.tryParse(parts[2]) ?? 1;
-    }
-    return 1;
-  }
-
-  void _updateProgress(int index, int newSeason, int newEpisode) {
-    if (newSeason < 1) newSeason = 1;
-    if (newEpisode < 1) newEpisode = 1;
-    
-    final title = _getTitle(_series[index]);
-    setState(() {
-      _series[index] = '$title:::$newSeason:::$newEpisode';
-    });
+  /// Llamado desde la pantalla de las 6 elecciones al pulsar "Marcar como vista".
+  void _removeByTitle(String title) {
+    final i = _series.indexWhere((s) => s.title == title);
+    if (i == -1) return;
+    setState(() => _series.removeAt(i));
     _saveSeries();
   }
 
-  // Diálogo de gestión ultra-intuitivo con diseño moderno
   void _showManagementDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF1C1C1E),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Progreso de Series',
-                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0A0A0A),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${_series.length}',
-                  style: const TextStyle(color: Color(0xFFE0BE4A), fontSize: 14, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 450,
-            child: _series.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No hay series en seguimiento.',
-                      style: TextStyle(color: Color(0xFF9E9E9E)),
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _series.length,
-                    itemBuilder: (context, index) {
-                      final item = _series[index];
-                      final title = _getTitle(item);
-                      final season = _getSeason(item);
-                      final episode = _getEpisode(item);
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0A0A0A),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withOpacity(0.05)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Título y botón de borrar
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    title,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                IconButton(
-                                  constraints: const BoxConstraints(),
-                                  padding: EdgeInsets.zero,
-                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                                  onPressed: () {
-                                    setState(() {
-                                      _series.removeAt(index);
-                                    });
-                                    setDialogState(() {});
-                                    _saveSeries();
-                                  },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            
-                            // Selectores visuales en formato píldora
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                // Control de Temporada
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1C1C1E),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Text('T', style: TextStyle(color: Color(0xFFE0BE4A), fontWeight: FontWeight.bold, fontSize: 12)),
-                                      const SizedBox(width: 8),
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (season > 1) {
-                                            _updateProgress(index, season - 1, episode);
-                                            setDialogState(() {});
-                                          }
-                                        },
-                                        child: const Icon(Icons.remove, color: Colors.white70, size: 16),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        child: Text(
-                                          '$season',
-                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                        ),
-                                      ),
-                                      GestureDetector(
-                                        onTap: () {
-                                          _updateProgress(index, season + 1, episode);
-                                          setDialogState(() {});
-                                        },
-                                        child: const Icon(Icons.add, color: Colors.white70, size: 16),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                // Control de Capítulo
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1C1C1E),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Text('C', style: TextStyle(color: Color(0xFFE0BE4A), fontWeight: FontWeight.bold, fontSize: 12)),
-                                      const SizedBox(width: 8),
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (episode > 1) {
-                                            _updateProgress(index, season, episode - 1);
-                                            setDialogState(() {});
-                                          }
-                                        },
-                                        child: const Icon(Icons.remove, color: Colors.white70, size: 16),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        child: Text(
-                                          '$episode',
-                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                        ),
-                                      ),
-                                      GestureDetector(
-                                        onTap: () {
-                                          _updateProgress(index, season, episode + 1);
-                                          setDialogState(() {});
-                                        },
-                                        child: const Icon(Icons.add, color: Colors.white70, size: 16),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      // Botón rápido para avanzar capítulo siguiente
-                                      GestureDetector(
-                                        onTap: () {
-                                          _updateProgress(index, season, episode + 1);
-                                          setDialogState(() {});
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.all(4),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFE0BE4A).withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: const Icon(Icons.done, color: Color(0xFFE0BE4A), size: 14),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar', style: TextStyle(color: Color(0xFFE0BE4A))),
-            ),
-          ],
-        ),
-      ),
+    showSeriesManagerSheet(
+      context,
+      series: _series,
+      onChanged: () {
+        if (mounted) setState(() {});
+        _saveSeries();
+      },
     );
   }
 
@@ -320,7 +108,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                     .split('\n')
                     .map((item) => item.trim())
                     .where((item) => item.isNotEmpty)
-                    .map((item) => '$item:::1:::1')
+                    .map((item) => SeriesEntry(item))
                     .toList();
 
                 setState(() {
@@ -348,7 +136,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cleanTitles = _series.map((s) => _getTitle(s)).toList();
+    final cleanTitles = _series.map((s) => s.title).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -443,7 +231,11 @@ class _SeriesScreenState extends State<SeriesScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => RollScreen(movies: cleanTitles, isSeries: true),
+                      builder: (context) => RollScreen(
+                        movies: cleanTitles,
+                        isSeries: true,
+                        onMarkWatched: _removeByTitle,
+                      ),
                     ),
                   );
                 },
@@ -511,6 +303,33 @@ class _SeriesScreenState extends State<SeriesScreen> {
               width: double.infinity,
               height: 56,
               child: OutlinedButton(
+                onPressed: _showManagementDialog,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1C1C1E),
+                  foregroundColor: const Color(0xFFE0BE4A),
+                  side: BorderSide(color: const Color(0xFFE0BE4A).withValues(alpha: 0.35)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('📺', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 8),
+                    Text(
+                      'Mi progreso (temporada y capítulo)',
+                      style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: OutlinedButton(
                 onPressed: _showBulkImportDialog,
                 style: OutlinedButton.styleFrom(
                   backgroundColor: const Color(0xFF1C1C1E),
@@ -524,7 +343,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text('📝', style: TextStyle(fontSize: 16)),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Text(
                       'Importar desde Bloc de Notas',
                       style: TextStyle(

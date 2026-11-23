@@ -22,6 +22,7 @@ class _MovieScreenState extends State<MovieScreen> {
   // Cargar películas desde la memoria del móvil
   Future<void> _loadMovies() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _movies = prefs.getStringList('saved_movies') ?? [];
     });
@@ -31,6 +32,14 @@ class _MovieScreenState extends State<MovieScreen> {
   Future<void> _saveMovies() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('saved_movies', _movies);
+  }
+
+  // Llamado desde la pantalla de las 6 elecciones al pulsar "Marcar como vista"
+  void _removeByTitle(String title) {
+    final i = _movies.indexOf(title);
+    if (i == -1) return;
+    setState(() => _movies.removeAt(i));
+    _saveMovies();
   }
 
   void _addMovie() {
@@ -276,7 +285,11 @@ class _MovieScreenState extends State<MovieScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => RollScreen(movies: _movies, isSeries: false),
+                      builder: (context) => RollScreen(
+                        movies: List<String>.from(_movies),
+                        isSeries: false,
+                        onMarkWatched: _removeByTitle,
+                      ),
                     ),
                   );
                 },
