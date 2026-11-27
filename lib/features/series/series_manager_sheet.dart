@@ -54,6 +54,14 @@ class _SeriesManager extends StatefulWidget {
 class _SeriesManagerState extends State<_SeriesManager> {
   final TextEditingController _search = TextEditingController();
   String _query = '';
+  late bool _showStarted;
+
+  @override
+  void initState() {
+    super.initState();
+    // Abre en "Empezadas" si ya hay alguna; si no, en "Pendientes"
+    _showStarted = widget.series.any((s) => s.started);
+  }
 
   @override
   void dispose() {
@@ -64,9 +72,16 @@ class _SeriesManagerState extends State<_SeriesManager> {
   void _apply(SeriesEntry entry, {int? season, int? episode}) {
     HapticFeedback.selectionClick();
     setState(() {
+      entry.started = true; // tocar el progreso = la has empezado
       entry.season = (season ?? entry.season).clamp(1, 999).toInt();
       entry.episode = (episode ?? entry.episode).clamp(1, 9999).toInt();
     });
+    widget.onChanged();
+  }
+
+  void _start(SeriesEntry entry) {
+    HapticFeedback.mediumImpact();
+    setState(() => entry.started = true);
     widget.onChanged();
   }
 
@@ -156,7 +171,10 @@ class _SeriesManagerState extends State<_SeriesManager> {
   @override
   Widget build(BuildContext context) {
     final q = _query.trim().toLowerCase();
+    final startedCount = widget.series.where((s) => s.started).length;
+    final pendingCount = widget.series.length - startedCount;
     final visible = widget.series
+        .where((s) => s.started == _showStarted)
         .where((s) => q.isEmpty || s.title.toLowerCase().contains(q))
         .toList();
 
@@ -198,6 +216,30 @@ class _SeriesManagerState extends State<_SeriesManager> {
             ],
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: _bg,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                _SegmentButton(
+                  label: 'Empezadas ($startedCount)',
+                  selected: _showStarted,
+                  onTap: () => setState(() => _showStarted = true),
+                ),
+                _SegmentButton(
+                  label: 'Pendientes ($pendingCount)',
+                  selected: !_showStarted,
+                  onTap: () => setState(() => _showStarted = false),
+                ),
+              ],
+            ),
+          ),
+        ),
         if (widget.series.length > 4)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
@@ -229,7 +271,11 @@ class _SeriesManagerState extends State<_SeriesManager> {
                       child: Text(
                         widget.series.isEmpty
                             ? 'No hay series en seguimiento.'
-                            : 'Ninguna serie coincide.',
+                            : q.isNotEmpty
+                                ? 'Ninguna serie coincide.'
+                                : _showStarted
+                                    ? 'Aún no has empezado ninguna serie.'
+                                    : 'No tienes series pendientes.',
                         style: const TextStyle(color: _muted),
                       ),
                     ),
@@ -241,6 +287,14 @@ class _SeriesManagerState extends State<_SeriesManager> {
                   itemCount: visible.length,
                   itemBuilder: (context, i) {
                     final entry = visible[i];
+                    if (!entry.started) {
+                      return _PendingCard(
+                        key: ObjectKey(entry),
+                        entry: entry,
+                        onStart: () => _start(entry),
+                        onDelete: () => _confirmDelete(entry),
+                      );
+                    }
                     return _SeriesCard(
                       key: ObjectKey(entry),
                       entry: entry,
@@ -494,6 +548,100 @@ class _RoundButton extends StatelessWidget {
             child: Icon(icon, size: 20, color: highlighted ? _gold : Colors.white70),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SegmentButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SegmentButton({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? _gold : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.black : _muted,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Serie que aún no has empezado: solo título + botón "Empezar".
+class _PendingCard extends StatelessWidget {
+  final SeriesEntry entry;
+  final VoidCallback onStart;
+  final VoidCallback onDelete;
+
+  const _PendingCard({
+    super.key,
+    required this.entry,
+    required this.onStart,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              entry.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            onPressed: onStart,
+            style: TextButton.styleFrom(
+              foregroundColor: _gold,
+              backgroundColor: _gold.withValues(alpha: 0.15),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Empezar', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            tooltip: 'Quitar serie',
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+            onPressed: onDelete,
+          ),
+        ],
       ),
     );
   }

@@ -136,7 +136,10 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cleanTitles = _series.map((s) => s.title).toList();
+    // El Roll 6 solo usa series SIN empezar
+    final pendingTitles = _series.where((s) => !s.started).map((s) => s.title).toList();
+    final pendingCount = pendingTitles.length;
+    final startedCount = _series.length - pendingCount;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -170,7 +173,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                     const Text('📺', style: TextStyle(fontSize: 14)),
                     const SizedBox(width: 6),
                     Text(
-                      '${_series.length} pendientes',
+                      '$pendingCount pendientes · $startedCount en curso',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
@@ -232,7 +235,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => RollScreen(
-                        movies: cleanTitles,
+                        movies: pendingTitles,
                         isSeries: true,
                         onMarkWatched: _removeByTitle,
                       ),
